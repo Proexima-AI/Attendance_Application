@@ -86,7 +86,20 @@ export default function WelcomeScreen() {
             </Text>
           </Text>
           <Text style={styles.termsText}>
-            By continuing you agree to our Terms & Conditions and Privacy policy
+            By continuing you agree to our{' '}
+            <Text
+              style={[styles.companyTextLink, { textDecorationLine: 'underline' }]}
+              onPress={() => Linking.openURL('https://attendify.proeximaai.com/terms-conditions.html')}
+            >
+              Terms & Conditions
+            </Text>
+            {' '}and{' '}
+            <Text
+              style={[styles.companyTextLink, { textDecorationLine: 'underline' }]}
+              onPress={() => Linking.openURL('https://attendify.proeximaai.com/privacy-policy.html')}
+            >
+              Privacy policy
+            </Text>
           </Text>
         </View>
 
