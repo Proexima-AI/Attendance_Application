@@ -1,12 +1,19 @@
 import React, { createContext, useState, useRef, ReactNode, useEffect } from 'react';
-import { Modal, View, StyleSheet, TouchableOpacity, Dimensions, Alert, ActivityIndicator } from 'react-native';
+import { Modal, View, StyleSheet, TouchableOpacity, Dimensions, Alert, ActivityIndicator, Image } from 'react-native';
 import { Text } from '../components/Themed';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { attendanceService } from '../services/attendanceService';
 import { useAuth } from '../hooks/useAuth';
+import {
+  formatAttendanceLocation,
+  getCurrentLocationLabel,
+  getTodayDateKey,
+  reverseGeocodeCoords,
+} from '../utils/locationHelper';
 
 const { height } = Dimensions.get('window');
 
@@ -23,6 +30,8 @@ type CheckInContextType = {
   selectedLocationType: string | null;
   isCheckedIn: boolean;
   isCheckedOut: boolean;
+  currentLocationLabel: string | null;
+  todayCheckInLocation: string | null;
 };
 
 export const CheckInContext = createContext<CheckInContextType>({
@@ -38,6 +47,8 @@ export const CheckInContext = createContext<CheckInContextType>({
   selectedLocationType: null,
   isCheckedIn: false,
   isCheckedOut: false,
+  currentLocationLabel: null,
+  todayCheckInLocation: null,
 });
 
 export const CheckInProvider = ({ children }: { children: ReactNode }) => {
@@ -52,24 +63,78 @@ export const CheckInProvider = ({ children }: { children: ReactNode }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   const [isCheckedOut, setIsCheckedOut] = useState(false);
+  const [currentLocationLabel, setCurrentLocationLabel] = useState<string | null>(null);
+  const [todayCheckInLocation, setTodayCheckInLocation] = useState<string | null>(null);
+  const [statusModal, setStatusModal] = useState<{
+    visible: boolean;
+    type: 'success' | 'error' | 'info';
+    title: string;
+    message: string;
+  }>({
+    visible: false,
+    type: 'info',
+    title: '',
+    message: '',
+  });
   const { user } = useAuth();
+
+  const showStatusModal = (type: 'success' | 'error' | 'info', title: string, message: string) => {
+    setStatusModal({ visible: true, type, title, message });
+  };
+
+  const closeStatusModal = () => {
+    setStatusModal(prev => ({ ...prev, visible: false }));
+  };
 
   const fetchStatus = async () => {
     try {
-      const response = await attendanceService.getStatus();
+      const [response, liveLabel] = await Promise.all([
+        attendanceService.getStatus(),
+        getCurrentLocationLabel(),
+      ]);
+
+      if (liveLabel) {
+        setCurrentLocationLabel(liveLabel);
+      }
+
+      const todayKey = `checkin_location_${getTodayDateKey()}`;
+      const cachedLocation = await AsyncStorage.getItem(todayKey);
+
       if (response.success && response.data) {
         setIsCheckedOut(response.data.checked_out);
         setIsCheckedIn(response.data.checked_in && !response.data.checked_out);
         if (response.data.record) {
-          if (response.data.record.checkin_time) {
-            setPunchInTime(new Date(response.data.record.checkin_time));
+          const rec = response.data.record;
+          if (rec.checkin_time) {
+            setPunchInTime(new Date(rec.checkin_time));
           }
-          if (response.data.record.checkout_time) {
-            setPunchOutTime(new Date(response.data.record.checkout_time));
+          if (rec.checkout_time) {
+            setPunchOutTime(new Date(rec.checkout_time));
           }
-          if (response.data.record.status) {
-            setAttendanceStatus(response.data.record.status);
+          if (rec.status) {
+            setAttendanceStatus(rec.status);
           }
+
+          // Resolve today's check-in location from backend record or cached location
+          const backendLoc = rec.address || rec.location;
+          if (backendLoc) {
+            const formatted = rec.attendance_type
+              ? formatAttendanceLocation(rec.attendance_type, backendLoc)
+              : backendLoc;
+            setTodayCheckInLocation(formatted);
+            await AsyncStorage.setItem(todayKey, formatted);
+          } else if (rec.latitude != null && rec.longitude != null) {
+            const place = await reverseGeocodeCoords(Number(rec.latitude), Number(rec.longitude));
+            const formatted = formatAttendanceLocation(rec.attendance_type, place || liveLabel);
+            setTodayCheckInLocation(formatted);
+            await AsyncStorage.setItem(todayKey, formatted);
+          } else if (cachedLocation) {
+            setTodayCheckInLocation(cachedLocation);
+          } else if (rec.checkin_time && (rec.attendance_type || liveLabel)) {
+            setTodayCheckInLocation(formatAttendanceLocation(rec.attendance_type, liveLabel));
+          }
+        } else if (cachedLocation) {
+          setTodayCheckInLocation(cachedLocation);
         }
       }
     } catch (e) {
@@ -101,7 +166,7 @@ export const CheckInProvider = ({ children }: { children: ReactNode }) => {
 
   const openCheckIn = async () => {
     if (isCheckedOut) {
-      Alert.alert("Notice", "Attendance was already recorded for today");
+      showStatusModal("info", "Notice", "Attendance was already recorded for today");
       return;
     }
 
@@ -159,7 +224,7 @@ export const CheckInProvider = ({ children }: { children: ReactNode }) => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         if (selectedLocationType === 'Office') {
-          Alert.alert("Permission Denied", "Location permission is required for Office.");
+          showStatusModal("error", "Permission Denied", "Location permission is required for Office.");
           setIsSubmitting(false);
           return;
         }
@@ -175,7 +240,7 @@ export const CheckInProvider = ({ children }: { children: ReactNode }) => {
           const response = await attendanceService.checkOut({ latitude, longitude });
           await fetchStatus(); // Fetch status to update UI instantly
           closeCheckIn();
-          Alert.alert("Success", response.message || "Checked out successfully");
+          showStatusModal("success", "Success", response.message || "Checked out successfully");
         } catch (error: any) {
           if (error?.requires_confirmation) {
             Alert.alert(
@@ -198,10 +263,10 @@ export const CheckInProvider = ({ children }: { children: ReactNode }) => {
                       });
                       await fetchStatus(); // Fetch status to update UI instantly
                       closeCheckIn();
-                      Alert.alert("Success", outOfBoundsResponse.message || "Out-of-bounds check-out requested successfully and is pending approval.");
+                      showStatusModal("success", "Success", outOfBoundsResponse.message || "Out-of-bounds check-out requested successfully and is pending approval.");
                     } catch (innerError: any) {
                       setIsSubmitting(false);
-                      Alert.alert("Check-out Failed", innerError?.message || "Failed to submit out-of-bounds check-out.");
+                      showStatusModal("error", "Check-out Failed", innerError?.message || "Failed to submit out-of-bounds check-out.");
                     }
                   }
                 }
@@ -210,7 +275,7 @@ export const CheckInProvider = ({ children }: { children: ReactNode }) => {
             return; // Wait for user action
           } else {
             setIsSubmitting(false);
-            Alert.alert("Check-out Failed", error?.message || "Failed to check out. Please try again.");
+            showStatusModal("error", "Check-out Failed", error?.message || "Failed to check out. Please try again.");
           }
         }
       } else {
@@ -226,6 +291,16 @@ export const CheckInProvider = ({ children }: { children: ReactNode }) => {
           selfie_data: capturedPhotoBase64 ? `data:image/jpeg;base64,${capturedPhotoBase64}` : null
         });
 
+        // Reverse-geocode and persist today's check-in location
+        const placeLabel =
+          latitude != null && longitude != null
+            ? await reverseGeocodeCoords(latitude, longitude)
+            : currentLocationLabel;
+        const formattedCheckInLoc = formatAttendanceLocation(selectedLocationType, placeLabel);
+        setTodayCheckInLocation(formattedCheckInLoc);
+        if (placeLabel) setCurrentLocationLabel(placeLabel);
+        await AsyncStorage.setItem(`checkin_location_${getTodayDateKey()}`, formattedCheckInLoc);
+
         await fetchStatus(); // Fetch status to update UI instantly
         closeCheckIn();
         
@@ -233,17 +308,17 @@ export const CheckInProvider = ({ children }: { children: ReactNode }) => {
         if (response.data?.warning) {
           alertMsg += `\n\nNote: ${response.data.warning}`;
         }
-        Alert.alert("Success", alertMsg);
+        showStatusModal("success", "Success", alertMsg);
       }
     } catch (error: any) {
       setIsSubmitting(false);
       const errorMsg = error?.message || "Failed to submit request. Please try again.";
-      Alert.alert("Error", errorMsg);
+      showStatusModal("error", "Error", errorMsg);
     }
   };
 
   return (
-    <CheckInContext.Provider value={{ punchInTime, punchOutTime, attendanceStatus, capturedPhoto, isCameraModalVisible, openCheckIn, closeCheckIn, setPunchInTime, fetchStatus, selectedLocationType, isCheckedIn, isCheckedOut }}>
+    <CheckInContext.Provider value={{ punchInTime, punchOutTime, attendanceStatus, capturedPhoto, isCameraModalVisible, openCheckIn, closeCheckIn, setPunchInTime, fetchStatus, selectedLocationType, isCheckedIn, isCheckedOut, currentLocationLabel, todayCheckInLocation }}>
       {children}
 
       {/* Location Selection Bottom Sheet */}
@@ -286,7 +361,13 @@ export const CheckInProvider = ({ children }: { children: ReactNode }) => {
           </View>
           
           <View style={styles.cameraContainer}>
-            {permission?.granted ? (
+            {capturedPhoto ? (
+              <Image
+                source={{ uri: capturedPhoto }}
+                style={styles.camera}
+                resizeMode="cover"
+              />
+            ) : permission?.granted ? (
               <>
                 <CameraView 
                   ref={cameraRef}
@@ -320,6 +401,73 @@ export const CheckInProvider = ({ children }: { children: ReactNode }) => {
                   {capturedPhoto ? (isCheckedIn ? 'Confirm Check Out' : 'Confirm Check In') : 'Take Photo'}
                 </Text>
               )}
+            </TouchableOpacity>
+            {capturedPhoto && !isSubmitting && (
+              <TouchableOpacity
+                style={styles.retakeButton}
+                onPress={() => {
+                  setCapturedPhoto(null);
+                  setCapturedPhotoBase64(null);
+                }}
+              >
+                <Text style={styles.retakeButtonText}>Retake Photo</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Customized Status Modal */}
+      <Modal
+        visible={statusModal.visible}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={closeStatusModal}
+      >
+        <View style={styles.statusModalOverlay}>
+          <View style={styles.statusModalCard}>
+            <View
+              style={[
+                styles.statusModalIconContainer,
+                statusModal.type === 'success'
+                  ? { backgroundColor: '#DCFCE7' }
+                  : statusModal.type === 'error'
+                  ? { backgroundColor: '#FEE2E2' }
+                  : { backgroundColor: '#EDE9FE' },
+              ]}
+            >
+              <Ionicons
+                name={
+                  statusModal.type === 'success'
+                    ? 'checkmark-circle'
+                    : statusModal.type === 'error'
+                    ? 'alert-circle'
+                    : 'information-circle'
+                }
+                size={40}
+                color={
+                  statusModal.type === 'success'
+                    ? COLORS.statusPresent
+                    : statusModal.type === 'error'
+                    ? COLORS.danger
+                    : COLORS.primary
+                }
+              />
+            </View>
+            <Text style={styles.statusModalTitle}>{statusModal.title}</Text>
+            <Text style={styles.statusModalMessage}>{statusModal.message}</Text>
+            <TouchableOpacity
+              style={[
+                styles.statusModalButton,
+                statusModal.type === 'success'
+                  ? { backgroundColor: COLORS.statusPresent }
+                  : statusModal.type === 'error'
+                  ? { backgroundColor: COLORS.danger }
+                  : { backgroundColor: COLORS.primary },
+              ]}
+              onPress={closeStatusModal}
+            >
+              <Text style={styles.statusModalButtonText}>OK</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -454,5 +602,70 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  retakeButton: {
+    marginTop: 12,
+    padding: 12,
+    alignItems: 'center',
+  },
+  retakeButtonText: {
+    color: COLORS.textMuted,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  statusModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  statusModalCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  statusModalIconContainer: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  statusModalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  statusModalMessage: {
+    fontSize: 15,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  statusModalButton: {
+    width: '100%',
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  statusModalButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });

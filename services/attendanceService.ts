@@ -46,6 +46,11 @@ export interface AttendanceHistoryItem {
     checkin_time?: string;
     checkout_time?: string;
     total_hours?: string;
+    attendance_type?: string;
+    location?: string;
+    address?: string;
+    latitude?: number | string | null;
+    longitude?: number | string | null;
   } | null;
 }
 

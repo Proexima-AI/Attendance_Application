@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Dimensions } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Dimensions, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Text } from '../../components/Themed';
 import { COLORS } from '../../constants/theme';
+import { useRefresh } from '../../hooks/useRefresh';
 import { payrollService, PayslipDetail } from '../../services/payrollService';
 
 const { width } = Dimensions.get('window');
@@ -13,28 +14,32 @@ export default function SalaryStructureScreen() {
   const [structure, setStructure] = useState<PayslipDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchStructure = async () => {
-      try {
-        // 1. Get latest payslip id
-        const slips = await payrollService.getMyPayslips();
-        if (slips.success && slips.data && slips.data.length > 0) {
-          const latestId = slips.data[0].id;
-          
-          // 2. Fetch full detail for the latest to get breakdown
-          const detailRes = await payrollService.getPayslipDetail(latestId);
-          if (detailRes.success && detailRes.data) {
-            setStructure(detailRes.data);
-          }
+  const fetchStructure = useCallback(async (showLoader = true) => {
+    try {
+      if (showLoader) setLoading(true);
+      // 1. Get latest payslip id
+      const slips = await payrollService.getMyPayslips();
+      if (slips.success && slips.data && slips.data.length > 0) {
+        const latestId = slips.data[0].id;
+        
+        // 2. Fetch full detail for the latest to get breakdown
+        const detailRes = await payrollService.getPayslipDetail(latestId);
+        if (detailRes.success && detailRes.data) {
+          setStructure(detailRes.data);
         }
-      } catch (error) {
-        console.error('Error fetching salary structure:', error);
-      } finally {
-        setLoading(false);
       }
-    };
-    fetchStructure();
+    } catch (error) {
+      console.error('Error fetching salary structure:', error);
+    } finally {
+      if (showLoader) setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchStructure(true);
+  }, [fetchStructure]);
+
+  const { refreshing, onRefresh } = useRefresh(() => fetchStructure(false));
 
   if (loading) {
     return (
@@ -85,7 +90,13 @@ export default function SalaryStructureScreen() {
         <View style={styles.headerRightSpacer} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />
+        }
+      >
         
         {/* Gross Overview Card */}
         <View style={styles.grossCard}>

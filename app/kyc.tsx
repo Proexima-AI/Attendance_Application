@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, StatusBar, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, RefreshControl, ScrollView, StatusBar, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text } from '../components/Themed';
+import { COLORS } from '../constants/theme';
+import { useRefresh } from '../hooks/useRefresh';
 import { KycData, kycService } from '../services/kycService';
 
 const PRIMARY_COLOR = '#4338CA';
@@ -13,8 +15,8 @@ export default function KycScreen() {
   const [kycData, setKycData] = useState<KycData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchKycData = async () => {
-    setLoading(true);
+  const fetchKycData = useCallback(async (showLoader = true) => {
+    if (showLoader) setLoading(true);
     try {
       const res = await kycService.getMyKyc();
       if (res.success && res.data) {
@@ -27,15 +29,17 @@ export default function KycScreen() {
       console.error('Error fetching KYC data:', error);
       setKycData(null);
     } finally {
-      setLoading(false);
+      if (showLoader) setLoading(false);
     }
-  };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      fetchKycData();
-    }, [])
+      fetchKycData(true);
+    }, [fetchKycData])
   );
+
+  const { refreshing, onRefresh } = useRefresh(() => fetchKycData(false));
 
   const handleDelete = () => {
     Alert.alert(
@@ -101,7 +105,13 @@ export default function KycScreen() {
             <ActivityIndicator size="large" color={PRIMARY_COLOR} />
           </View>
         ) : hasData ? (
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />
+            }
+          >
             {/* Profile Photo Display */}
             {kycData?.profile_photo && (
               <View style={styles.photoContainer}>
@@ -195,7 +205,13 @@ export default function KycScreen() {
             )}
           </ScrollView>
         ) : (
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />
+            }
+          >
             <View style={styles.emptyContainer}>
               <Ionicons name="document-text-outline" size={64} color="#9CA3AF" />
               <Text style={styles.emptyTitle}>No KYC Documents Found</Text>

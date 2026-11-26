@@ -2,7 +2,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import React, { useContext, useEffect, useState } from 'react';
-import { AppState, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, AppState, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { Text } from '../components/Themed';
 import { COLORS } from '../constants/theme';
@@ -16,6 +16,8 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isFormActive, setIsFormActive] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
 
   const player = useVideoPlayer(videoSource, player => {
     player.loop = false; // Set loop to false so video stops and holds on the last frame
@@ -102,12 +104,16 @@ export default function LoginScreen() {
   }, []);
 
   const handleLogin = async () => {
+    if (isSubmitting) return;
     if (phone && password) {
+      setIsSubmitting(true);
       try {
         await login({ phone, password });
         // Routing is now automatically handled by _layout.tsx based on the user session state
       } catch (e: any) {
-        alert(e.response?.data?.message || 'Login failed. Please check your credentials.');
+        setShowErrorModal(true);
+      } finally {
+        setIsSubmitting(false);
       }
     }
   };
@@ -166,23 +172,24 @@ export default function LoginScreen() {
             <View style={styles.formContainer}>
               <View style={styles.fieldContainer}>
                 <Text style={styles.fieldLabel}>PHONE NUMBER</Text>
-                <View style={[styles.inputGroup, phone.length > 0 ? styles.inputGroupActive : null]}>
+                <View style={[styles.inputGroup, phone.length > 0 ? styles.inputGroupActive : null, isSubmitting ? styles.inputGroupDisabled : null]}>
                   <MaterialCommunityIcons name="phone-outline" size={20} color={COLORS.primary} style={styles.leftIcon} />
                   <TextInput
                     style={styles.input}
-                    placeholder="+91 98765 43210"
+                    placeholder="Enter phone number"
                     placeholderTextColor={COLORS.textMuted}
                     value={phone}
                     onChangeText={setPhone}
                     keyboardType="phone-pad"
                     autoCapitalize="none"
+                    editable={!isSubmitting}
                   />
                 </View>
               </View>
 
               <View style={styles.fieldContainer}>
                 <Text style={styles.fieldLabel}>PASSWORD</Text>
-                <View style={[styles.inputGroup, password.length > 0 ? styles.inputGroupActive : null]}>
+                <View style={[styles.inputGroup, password.length > 0 ? styles.inputGroupActive : null, isSubmitting ? styles.inputGroupDisabled : null]}>
                   <MaterialCommunityIcons name="lock-outline" size={20} color={COLORS.primary} style={styles.leftIcon} />
                   <TextInput
                     style={styles.input}
@@ -191,10 +198,12 @@ export default function LoginScreen() {
                     value={password}
                     onChangeText={setPassword}
                     secureTextEntry={!showPassword}
+                    editable={!isSubmitting}
                   />
                   <TouchableOpacity
                     style={styles.eyeIcon}
                     onPress={() => setShowPassword(!showPassword)}
+                    disabled={isSubmitting}
                   >
                     <MaterialCommunityIcons
                       name={showPassword ? "eye-outline" : "eye-off-outline"}
@@ -203,21 +212,52 @@ export default function LoginScreen() {
                     />
                   </TouchableOpacity>
                 </View>
-                <TouchableOpacity 
+                {/* <TouchableOpacity
                   style={styles.forgotPasswordContainer}
                   onPress={() => router.push('/reset-password')}
                 >
                   <Text style={styles.forgotPasswordText}>Forgot password?</Text>
-                </TouchableOpacity>
+                </TouchableOpacity> */}
               </View>
 
-              <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-                <Text style={styles.loginButtonText}>Login</Text>
+              <TouchableOpacity
+                style={[styles.loginButton, isSubmitting ? styles.loginButtonDisabled : null]}
+                onPress={handleLogin}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.loginButtonText}>Login</Text>
+                )}
               </TouchableOpacity>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
       </Animated.View>
+
+      <Modal
+        visible={showErrorModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowErrorModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalIconContainer}>
+              <MaterialCommunityIcons name="alert-circle-outline" size={36} color={COLORS.danger} />
+            </View>
+            <Text style={styles.modalTitle}>Login Failed</Text>
+            <Text style={styles.modalMessage}>Login failed. Try after sometime.</Text>
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => setShowErrorModal(false)}
+            >
+              <Text style={styles.modalButtonText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -300,6 +340,10 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primary,
     backgroundColor: '#FFFFFF',
   },
+  inputGroupDisabled: {
+    backgroundColor: '#F1F5F9',
+    opacity: 0.65,
+  },
   leftIcon: {
     marginRight: 12,
   },
@@ -339,5 +383,64 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  loginButtonDisabled: {
+    opacity: 0.8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  modalIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FEE2E2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 8,
+  },
+  modalMessage: {
+    fontSize: 15,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  modalButton: {
+    width: '100%',
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });

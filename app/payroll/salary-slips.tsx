@@ -1,31 +1,36 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Text } from '../../components/Themed';
 import { COLORS } from '../../constants/theme';
+import { useRefresh } from '../../hooks/useRefresh';
 import { payrollService, PayslipItem } from '../../services/payrollService';
 
 export default function SalarySlipsScreen() {
   const [payslips, setPayslips] = useState<PayslipItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchPayslips = async () => {
-      try {
-        const res = await payrollService.getMyPayslips();
-        if (res.success && res.data) {
-          setPayslips(res.data);
-        }
-      } catch (error) {
-        console.error('Error fetching payslips:', error);
-      } finally {
-        setLoading(false);
+  const fetchPayslips = useCallback(async (showLoader = true) => {
+    try {
+      if (showLoader) setLoading(true);
+      const res = await payrollService.getMyPayslips();
+      if (res.success && res.data) {
+        setPayslips(res.data);
       }
-    };
-    fetchPayslips();
+    } catch (error) {
+      console.error('Error fetching payslips:', error);
+    } finally {
+      if (showLoader) setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchPayslips(true);
+  }, [fetchPayslips]);
+
+  const { refreshing, onRefresh } = useRefresh(() => fetchPayslips(false));
 
   const getMonthName = (monthNumber: number) => {
     const date = new Date();
@@ -43,7 +48,13 @@ export default function SalarySlipsScreen() {
         <View style={styles.headerRightSpacer} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />
+        }
+      >
         {loading ? (
           <ActivityIndicator size="large" color={COLORS.primary} style={{ marginTop: 40 }} />
         ) : payslips.length === 0 ? (

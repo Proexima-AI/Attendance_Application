@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Dimensions } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Dimensions, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Text } from '../../components/Themed';
 import { COLORS } from '../../constants/theme';
+import { useRefresh } from '../../hooks/useRefresh';
 import { payrollService, PayslipItem } from '../../services/payrollService';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -14,22 +15,26 @@ export default function MyPayScreen() {
   const [latestPayslip, setLatestPayslip] = useState<PayslipItem | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchLatestPay = async () => {
-      try {
-        const res = await payrollService.getMyPayslips();
-        if (res.success && res.data && res.data.length > 0) {
-          // Sort to be safe, but usually API returns latest first. We'll just take the first.
-          setLatestPayslip(res.data[0]);
-        }
-      } catch (error) {
-        console.error('Error fetching my pay:', error);
-      } finally {
-        setLoading(false);
+  const fetchLatestPay = useCallback(async (showLoader = true) => {
+    try {
+      if (showLoader) setLoading(true);
+      const res = await payrollService.getMyPayslips();
+      if (res.success && res.data && res.data.length > 0) {
+        // Sort to be safe, but usually API returns latest first. We'll just take the first.
+        setLatestPayslip(res.data[0]);
       }
-    };
-    fetchLatestPay();
+    } catch (error) {
+      console.error('Error fetching my pay:', error);
+    } finally {
+      if (showLoader) setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchLatestPay(true);
+  }, [fetchLatestPay]);
+
+  const { refreshing, onRefresh } = useRefresh(() => fetchLatestPay(false));
 
   const getMonthName = (monthNumber: number) => {
     const date = new Date();
@@ -80,7 +85,13 @@ export default function MyPayScreen() {
         <View style={styles.headerRightSpacer} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />
+        }
+      >
         
         {/* Month Indicator */}
         <View style={styles.monthHeader}>

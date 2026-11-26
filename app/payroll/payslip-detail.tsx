@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Text } from '../../components/Themed';
 import { COLORS } from '../../constants/theme';
+import { useRefresh } from '../../hooks/useRefresh';
 import { payrollService, PayslipDetail } from '../../services/payrollService';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -15,24 +16,26 @@ export default function PayslipDetailScreen() {
   const [payslip, setPayslip] = useState<PayslipDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchDetail = useCallback(async (showLoader = true) => {
     if (!id) return;
-    
-    const fetchDetail = async () => {
-      try {
-        const res = await payrollService.getPayslipDetail(Number(id));
-        if (res.success && res.data) {
-          setPayslip(res.data);
-        }
-      } catch (error) {
-        console.error('Error fetching payslip detail:', error);
-      } finally {
-        setLoading(false);
+    try {
+      if (showLoader) setLoading(true);
+      const res = await payrollService.getPayslipDetail(Number(id));
+      if (res.success && res.data) {
+        setPayslip(res.data);
       }
-    };
-    
-    fetchDetail();
+    } catch (error) {
+      console.error('Error fetching payslip detail:', error);
+    } finally {
+      if (showLoader) setLoading(false);
+    }
   }, [id]);
+
+  useEffect(() => {
+    fetchDetail(true);
+  }, [fetchDetail]);
+
+  const { refreshing, onRefresh } = useRefresh(() => fetchDetail(false));
 
   const getMonthName = (monthNumber: number) => {
     const date = new Date();
@@ -169,7 +172,13 @@ export default function PayslipDetailScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />
+        }
+      >
         
         {/* Net Salary Highlight */}
         <View style={styles.netSalaryCard}>

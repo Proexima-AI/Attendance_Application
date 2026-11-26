@@ -1,4 +1,4 @@
-import { Dimensions, Image, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Dimensions, Image, RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useContext, useEffect, useRef, useState, useCallback } from 'react';
@@ -7,15 +7,17 @@ import { Text } from '../../components/Themed';
 import { COLORS, SIZES } from '../../constants/theme';
 import { CheckInContext } from '../../context/CheckInContext';
 import { useAuth } from '../../hooks/useAuth';
+import { useRefresh } from '../../hooks/useRefresh';
 import { attendanceService, AttendanceHistoryItem, MonthStats } from '../../services/attendanceService';
 import { kycService, KycData } from '../../services/kycService';
 import { getWorkDetails } from '../../services/profileService';
 import { WorkDetails } from '../../types/profile';
+import { getHistoryItemLocation } from '../../utils/locationHelper';
 
 export default function HomeScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
-  const { punchInTime, punchOutTime, attendanceStatus } = useContext(CheckInContext);
+  const { punchInTime, punchOutTime, attendanceStatus, isCheckedIn, isCheckedOut, fetchStatus, currentLocationLabel, todayCheckInLocation } = useContext(CheckInContext);
 
   const [weeklyHistory, setWeeklyHistory] = useState<AttendanceHistoryItem[]>([]);
   const [monthStats, setMonthStats] = useState<MonthStats | null>(null);
@@ -24,50 +26,59 @@ export default function HomeScreen() {
   const [kycData, setKycData] = useState<KycData | null>(null);
   const [workDetails, setWorkDetails] = useState<WorkDetails | null>(null);
 
+  const fetchUserData = useCallback(async () => {
+    try {
+      const [kycRes, wd] = await Promise.all([
+        kycService.getMyKyc().catch(() => null),
+        getWorkDetails().catch(() => null),
+      ]);
+      if (kycRes?.success && kycRes.data) setKycData(kycRes.data);
+      if (wd) setWorkDetails(wd);
+    } catch (e) {
+      console.log('Error fetching user data on home');
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
-      let isActive = true;
-      const fetchUserData = async () => {
-        try {
-          const kycRes = await kycService.getMyKyc();
-          if (isActive && kycRes.success && kycRes.data) setKycData(kycRes.data);
-        } catch (e) {
-          console.log('No KYC data on home');
-        }
-
-        try {
-          const wd = await getWorkDetails();
-          if (isActive) setWorkDetails(wd);
-        } catch (e: any) {
-          console.log('No work details on home:', e?.response?.status || e.message);
-        }
-      };
       fetchUserData();
-      return () => { isActive = false; };
-    }, [])
+    }, [fetchUserData])
   );
 
-  useEffect(() => {
-    const fetchAllData = async () => {
-      try {
-        const [historyResponse, dashboardResponse] = await Promise.all([
-          attendanceService.getWeeklyHistory(),
-          attendanceService.getDashboardStats()
-        ]);
+  const fetchAllData = useCallback(async () => {
+    try {
+      const [historyResponse, dashboardResponse] = await Promise.all([
+        attendanceService.getWeeklyHistory(),
+        attendanceService.getDashboardStats()
+      ]);
 
-        if (historyResponse.success && historyResponse.data) {
-          setWeeklyHistory([...historyResponse.data].reverse());
-        }
-
-        if (dashboardResponse.success && dashboardResponse.data?.month_stats) {
-          setMonthStats(dashboardResponse.data.month_stats);
-        }
-      } catch (error) {
-        console.error('Failed to fetch dashboard data', error);
+      if (historyResponse.success && historyResponse.data) {
+        setWeeklyHistory([...historyResponse.data].reverse());
       }
-    };
-    fetchAllData();
+
+      if (dashboardResponse.success && dashboardResponse.data?.month_stats) {
+        setMonthStats(dashboardResponse.data.month_stats);
+      }
+    } catch (error) {
+      console.error('Failed to fetch dashboard data', error);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchAllData();
+  }, [fetchAllData, punchInTime, punchOutTime, isCheckedIn, isCheckedOut]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchAllData();
+    }, [fetchAllData])
+  );
+
+  const handleRefresh = useCallback(async () => {
+    await Promise.all([fetchStatus(), fetchUserData(), fetchAllData()]);
+  }, [fetchStatus, fetchUserData, fetchAllData]);
+
+  const { refreshing, onRefresh } = useRefresh(handleRefresh);
 
   const getStatusText = (status: string | null) => {
     if (status === 'present') return 'On Time';
@@ -171,7 +182,13 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'top']}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 100 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />
+        }
+      >
         {/* Header */}
         <View style={styles.headerContainer}>
           <View style={styles.headerProfile}>
@@ -216,7 +233,7 @@ export default function HomeScreen() {
             </Text>
             <View style={styles.locationPill}>
               <Ionicons name="location" size={12} color="#FFFFFF" />
-              <Text style={styles.locationPillText} numberOfLines={1}>Bhubaneswar, Odisha</Text>
+              <Text style={styles.locationPillText} numberOfLines={1}>{currentLocationLabel || 'Locating...'}</Text>
             </View>
           </View>
           <View style={styles.attendanceGrid}>
@@ -321,14 +338,14 @@ export default function HomeScreen() {
                   </View>
                   <View style={styles.historyLocationRow}>
                     <Ionicons name="location" size={12} color={COLORS.primary} />
-                    <Text style={styles.historyLocationText}>Office, Bhubaneswar, Odisha</Text>
+                    <Text style={styles.historyLocationText}>{getHistoryItemLocation(item, todayCheckInLocation)}</Text>
                   </View>
                 </View>
               </View>
             );
           })}
 
-          {/* Live Location Card */}
+          {/* Live Location Card
           <View style={styles.liveLocationContainer}>
             <Text style={styles.sectionTitle}>Live Location</Text>
             <View style={styles.card}>
@@ -341,7 +358,7 @@ export default function HomeScreen() {
               <View style={styles.locationFooter}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <Ionicons name="location-outline" size={16} color={COLORS.primary} />
-                  <Text style={styles.locationText}>Bhubaneswar, Odisha</Text>
+                  <Text style={styles.locationText}>{currentLocationLabel || 'Locating...'}</Text>
                 </View>
                 <View style={styles.trackedBadge}>
                   <Text style={styles.trackedBadgeText}>Tracked</Text>
@@ -349,6 +366,7 @@ export default function HomeScreen() {
               </View>
             </View>
           </View>
+          */}
 
         </View>
       </ScrollView>

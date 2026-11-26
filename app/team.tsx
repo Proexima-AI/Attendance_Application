@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text } from '../components/Themed';
 import { COLORS } from '../constants/theme';
+import { useRefresh } from '../hooks/useRefresh';
 import { teamService, TeamMemberResponse } from '../services/teamService';
 
 export default function TeamScreen() {
@@ -13,13 +14,9 @@ export default function TeamScreen() {
   const [team, setTeam] = useState<TeamMemberResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    fetchTeam();
-  }, []);
-
-  const fetchTeam = async () => {
+  const fetchTeam = useCallback(async (showLoader = true) => {
     try {
-      setIsLoading(true);
+      if (showLoader) setIsLoading(true);
       const response = await teamService.getTeam();
       if (response.success && response.data?.team) {
         setTeam(response.data.team);
@@ -30,9 +27,15 @@ export default function TeamScreen() {
       console.error('Failed to fetch team:', error);
       Alert.alert("Error", error.message || "An error occurred while fetching the team.");
     } finally {
-      setIsLoading(false);
+      if (showLoader) setIsLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchTeam(true);
+  }, [fetchTeam]);
+
+  const { refreshing, onRefresh } = useRefresh(() => fetchTeam(false));
 
   const getStatusColor = () => {
     return { bg: '#DCFCE7', text: '#15803D' };
@@ -59,7 +62,13 @@ export default function TeamScreen() {
             <ActivityIndicator size="large" color={COLORS.primary} />
           </View>
         ) : (
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />
+            }
+          >
             {/* Team Members Section */}
             <Text style={[styles.sectionHeader]}>Employees ({team.length})</Text>
             <View style={isGridView ? styles.gridContainer : null}>

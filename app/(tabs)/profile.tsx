@@ -3,11 +3,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useState } from 'react';
-import { Alert, Dimensions, Image, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, Dimensions, Image, RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '../../components/Themed';
 import { COLORS, SIZES } from '../../constants/theme';
 import { useAuth } from '../../hooks/useAuth';
+import { useRefresh } from '../../hooks/useRefresh';
 import { KycData, kycService } from '../../services/kycService';
 import { getWorkDetails } from '../../services/profileService';
 import { WorkDetails } from '../../types/profile';
@@ -41,35 +42,41 @@ export default function ProfileScreen() {
   const [kycData, setKycData] = useState<KycData | null>(null);
   const [workDetails, setWorkDetails] = useState<WorkDetails | null>(null);
 
+  const fetchAllData = useCallback(async () => {
+    try {
+      const [res, wd] = await Promise.all([
+        kycService.getMyKyc().catch(() => null),
+        getWorkDetails().catch(() => null),
+      ]);
+      if (res?.success && res.data) {
+        setKycData(res.data);
+      }
+      if (wd) {
+        setWorkDetails(wd);
+      }
+    } catch (e) {
+      console.log('Error fetching profile data');
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
-      let isActive = true;
-      const fetchAllData = async () => {
-        try {
-          const res = await kycService.getMyKyc();
-          if (isActive && res.success && res.data) {
-            setKycData(res.data);
-          }
-        } catch (e) {
-          console.log('No KYC data found or error fetching');
-        }
-
-        try {
-          const wd = await getWorkDetails();
-          if (isActive) setWorkDetails(wd);
-        } catch (e: any) {
-          console.log('No WorkDetails found or error fetching:', e?.response?.status || e.message);
-        }
-      };
       fetchAllData();
-      return () => { isActive = false; };
-    }, [])
+    }, [fetchAllData])
   );
+
+  const { refreshing, onRefresh } = useRefresh(fetchAllData);
 
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 40 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />
+        }
+      >
         {/* Full-width Portrait Header (Like Image 1) */}
         <View style={styles.headerContainer}>
           <Image

@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, TouchableOpacity, ScrollView, ActivityIndicator, Image } from 'react-native';
+import React, { useCallback, useState, useEffect } from 'react';
+import { StyleSheet, View, TouchableOpacity, ScrollView, ActivityIndicator, Image, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text } from '../../components/Themed';
 import { COLORS } from '../../constants/theme';
 import { API_CONFIG } from '../../constants/api';
+import { useRefresh } from '../../hooks/useRefresh';
 import { visitApi } from '../../services/visitApi';
 import { Visit } from '../../types/visit';
 
@@ -18,24 +19,28 @@ export default function VisitDetailScreen() {
   const [visit, setVisit] = useState<Visit | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchVisitDetails = async () => {
-      try {
-        const response = await visitApi.getVisits();
-        if (response.success) {
-          const foundVisit = response.data.find(v => v.id.toString() === id);
-          if (foundVisit) {
-            setVisit(foundVisit);
-          }
+  const fetchVisitDetails = useCallback(async (showLoader = true) => {
+    try {
+      if (showLoader) setLoading(true);
+      const response = await visitApi.getVisits();
+      if (response.success) {
+        const foundVisit = response.data.find(v => v.id.toString() === id);
+        if (foundVisit) {
+          setVisit(foundVisit);
         }
-      } catch (error) {
-        console.error('Failed to fetch visit details', error);
-      } finally {
-        setLoading(false);
       }
-    };
-    fetchVisitDetails();
+    } catch (error) {
+      console.error('Failed to fetch visit details', error);
+    } finally {
+      if (showLoader) setLoading(false);
+    }
   }, [id]);
+
+  useEffect(() => {
+    fetchVisitDetails(true);
+  }, [fetchVisitDetails]);
+
+  const { refreshing, onRefresh } = useRefresh(() => fetchVisitDetails(false));
 
   if (loading) {
     return (
@@ -81,7 +86,13 @@ export default function VisitDetailScreen() {
         </View>
       </SafeAreaView>
 
-      <ScrollView style={styles.contentContainer} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        style={styles.contentContainer}
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />
+        }
+      >
         
         {/* Main Header Card */}
         <View style={styles.card}>

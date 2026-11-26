@@ -1,16 +1,19 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import React, { useMemo, useRef, useState } from 'react';
-import { Alert, Dimensions, Image, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { Alert, Dimensions, Image, Modal, RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MonthlySummaryCard } from '../../components/MonthlySummaryCard';
 import { Text } from '../../components/Themed';
 import { API_CONFIG } from '../../constants/api';
 import { COLORS } from '../../constants/theme';
 import { AttendanceHistoryItem, attendanceService, CalendarDayRecord } from '../../services/attendanceService';
+import { CheckInContext } from '../../context/CheckInContext';
+import { useRefresh } from '../../hooks/useRefresh';
+import { getHistoryItemLocation } from '../../utils/locationHelper';
 import { TokenManager } from '../../utils/tokenManager';
 
 interface AttendanceLog {
@@ -82,22 +85,37 @@ export default function LogsScreen() {
 
   const yearScrollRef = useRef<ScrollView>(null);
 
+  const { punchInTime, punchOutTime, isCheckedIn, isCheckedOut, fetchStatus, todayCheckInLocation } = useContext(CheckInContext);
+
   // New state for real weekly history
   const [weeklyHistory, setWeeklyHistory] = useState<AttendanceHistoryItem[]>([]);
 
-  React.useEffect(() => {
-    const fetchHistory = async () => {
-      try {
-        const response = await attendanceService.getWeeklyHistory();
-        if (response.success && response.data) {
-          setWeeklyHistory([...response.data].reverse());
-        }
-      } catch (error) {
-        console.error('Failed to fetch weekly history in logs', error);
+  const fetchHistory = useCallback(async () => {
+    try {
+      const response = await attendanceService.getWeeklyHistory();
+      if (response.success && response.data) {
+        setWeeklyHistory([...response.data].reverse());
       }
-    };
-    fetchHistory();
+    } catch (error) {
+      console.error('Failed to fetch weekly history in logs', error);
+    }
   }, []);
+
+  React.useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory, punchInTime, punchOutTime, isCheckedIn, isCheckedOut]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchHistory();
+    }, [fetchHistory])
+  );
+
+  const handleRefresh = useCallback(async () => {
+    await Promise.all([fetchStatus(), fetchHistory()]);
+  }, [fetchStatus, fetchHistory]);
+
+  const { refreshing, onRefresh } = useRefresh(handleRefresh);
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -368,7 +386,13 @@ export default function LogsScreen() {
         <View style={styles.headerRightSpacer} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />
+        }
+      >
         {/* Transparent spacer to let top of boy show through before scrolling */}
         <View style={styles.heroSpacer} />
 
@@ -500,7 +524,7 @@ export default function LogsScreen() {
 
                         <View style={styles.locationRow}>
                           <MaterialCommunityIcons name="map-marker" size={16} color="#FFFFFF" style={styles.pinIcon} />
-                          <Text style={styles.highlightedLocationText} numberOfLines={1}>Office, Bhubaneswar, Odisha</Text>
+                          <Text style={styles.highlightedLocationText} numberOfLines={1}>{getHistoryItemLocation(item, todayCheckInLocation)}</Text>
                         </View>
                       </View>
                     </View>
@@ -538,7 +562,7 @@ export default function LogsScreen() {
 
                       <View style={styles.locationRow}>
                         <MaterialCommunityIcons name="map-marker" size={16} color={COLORS.primary} style={styles.pinIcon} />
-                        <Text style={styles.normalLocationText} numberOfLines={1}>Office, Bhubaneswar, Odisha</Text>
+                        <Text style={styles.normalLocationText} numberOfLines={1}>{getHistoryItemLocation(item, todayCheckInLocation)}</Text>
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -709,7 +733,19 @@ export default function LogsScreen() {
                   {/* Location row */}
                   <View style={[styles.locationRow, { marginTop: 20, paddingHorizontal: 0 }]}>
                     <MaterialCommunityIcons name="map-marker" size={16} color={COLORS.primary} style={styles.pinIcon} />
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.primary }} numberOfLines={1}>Office, Bhubaneswar, Odisha</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.primary }} numberOfLines={1}>
+                      {getHistoryItemLocation(
+                        dayLog
+                          ? {
+                              date: dayLog.date,
+                              attendance_data: attendanceData
+                                ? { ...attendanceData, checkin_time: checkInRaw }
+                                : null,
+                            }
+                          : null,
+                        todayCheckInLocation
+                      )}
+                    </Text>
                   </View>
                 </View>
               );

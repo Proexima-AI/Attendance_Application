@@ -2,10 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState, useCallback } from 'react';
-import { ScrollView, StyleSheet, TouchableOpacity, View, Modal, ActivityIndicator, FlatList, Alert } from 'react-native';
+import { ScrollView, StyleSheet, TouchableOpacity, View, Modal, ActivityIndicator, FlatList, Alert, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text } from '../components/Themed';
 import { COLORS } from '../constants/theme';
+import { useRefresh } from '../hooks/useRefresh';
 import { visitApi } from '../services/visitApi';
 import { Visit, VisitStats } from '../types/visit';
 
@@ -36,9 +37,9 @@ export default function VisitScreen() {
   const [modalVisits, setModalVisits] = useState<Visit[]>([]);
   const [loadingModal, setLoadingModal] = useState(false);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async (showLoader = true) => {
     try {
-      setLoading(true);
+      if (showLoader) setLoading(true);
       const [statsRes, historyRes] = await Promise.all([
         visitApi.getVisitStats(),
         visitApi.getVisits()
@@ -48,15 +49,17 @@ export default function VisitScreen() {
     } catch (error) {
       console.error('Failed to fetch visit dashboard data:', error);
     } finally {
-      setLoading(false);
+      if (showLoader) setLoading(false);
     }
-  };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      fetchDashboardData();
-    }, [])
+      fetchDashboardData(true);
+    }, [fetchDashboardData])
   );
+
+  const { refreshing, onRefresh } = useRefresh(() => fetchDashboardData(false));
 
   const openSelectionModal = async (type: 'checkin' | 'checkout') => {
     setModalType(type);
@@ -95,7 +98,13 @@ export default function VisitScreen() {
       </SafeAreaView>
 
       <View style={styles.contentContainer}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />
+          }
+        >
           
           {/* Top Cards for Check-In and Checkout */}
           <View style={styles.actionCardsRow}>

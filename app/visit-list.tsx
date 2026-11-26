@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, TouchableOpacity, FlatList, ActivityIndicator } from 'react-native';
+import React, { useCallback, useState, useEffect } from 'react';
+import { StyleSheet, View, TouchableOpacity, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text } from '../components/Themed';
 import { COLORS } from '../constants/theme';
+import { useRefresh } from '../hooks/useRefresh';
 import { visitApi } from '../services/visitApi';
 import { Visit } from '../types/visit';
 
@@ -15,36 +16,38 @@ export default function VisitListScreen() {
   const [visits, setVisits] = useState<Visit[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchVisits = async () => {
-      setLoading(true);
-      try {
-        let statusFilter: string | undefined = undefined;
-        
-        if (filter === 'completed') statusFilter = 'completed';
-        else if (filter === 'pending' || filter === 'upcoming') statusFilter = 'pending';
+  const fetchVisits = useCallback(async (showLoader = true) => {
+    if (showLoader) setLoading(true);
+    try {
+      let statusFilter: string | undefined = undefined;
+      
+      if (filter === 'completed') statusFilter = 'completed';
+      else if (filter === 'pending' || filter === 'upcoming') statusFilter = 'pending';
 
-        const response = await visitApi.getVisits(statusFilter ? { status: statusFilter } : undefined);
+      const response = await visitApi.getVisits(statusFilter ? { status: statusFilter } : undefined);
+      
+      if (response.success) {
+        let data = response.data;
         
-        if (response.success) {
-          let data = response.data;
-          
-          if (filter === 'upcoming') {
-            const today = new Date().toISOString().split('T')[0];
-            data = data.filter(v => v.visit_date >= today);
-          }
-          
-          setVisits(data);
+        if (filter === 'upcoming') {
+          const today = new Date().toISOString().split('T')[0];
+          data = data.filter(v => v.visit_date >= today);
         }
-      } catch (error) {
-        console.error('Failed to fetch visits for list', error);
-      } finally {
-        setLoading(false);
+        
+        setVisits(data);
       }
-    };
-    
-    fetchVisits();
+    } catch (error) {
+      console.error('Failed to fetch visits for list', error);
+    } finally {
+      if (showLoader) setLoading(false);
+    }
   }, [filter]);
+
+  useEffect(() => {
+    fetchVisits(true);
+  }, [fetchVisits]);
+
+  const { refreshing, onRefresh } = useRefresh(() => fetchVisits(false));
 
   const getTitle = () => {
     switch(filter) {
@@ -76,6 +79,9 @@ export default function VisitListScreen() {
             contentContainerStyle={styles.listContent}
             data={visits}
             keyExtractor={item => item.id.toString()}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />
+            }
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <Ionicons name="folder-open-outline" size={48} color="#D1D5DB" />

@@ -1,13 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import { attendanceService, LeaveBalance, LeaveHistoryItem, ApplyLeavePayload } from '../../services/attendanceService';
 import {
   Alert,
   Dimensions,
   Image,
   Modal,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -17,6 +18,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text } from '../../components/Themed';
 import { COLORS } from '../../constants/theme';
+import { useRefresh } from '../../hooks/useRefresh';
 
 interface LeaveRequest {
   id: string;
@@ -78,14 +80,17 @@ export default function LeavesScreen() {
   const [leaveBalances, setLeaveBalances] = useState<LeaveBalance[]>([]);
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
 
-  const fetchLeaveData = async () => {
+  const fetchLeaveData = useCallback(async () => {
     try {
-      const balancesRes = await attendanceService.getLeaveBalances();
+      const [balancesRes, historyRes] = await Promise.all([
+        attendanceService.getLeaveBalances(),
+        attendanceService.getLeaveHistory(),
+      ]);
+
       if (balancesRes.success && balancesRes.data) {
         setLeaveBalances(balancesRes.data);
       }
-      
-      const historyRes = await attendanceService.getLeaveHistory();
+
       if (historyRes.success && historyRes.data) {
         const mappedHistory = historyRes.data.map((item: LeaveHistoryItem) => {
           let typeLabel = item.leave_type;
@@ -106,7 +111,9 @@ export default function LeavesScreen() {
     } catch (error) {
       console.error('Error fetching leave data:', error);
     }
-  };
+  }, []);
+
+  const { refreshing, onRefresh } = useRefresh(fetchLeaveData);
 
   useEffect(() => {
     fetchLeaveData();
@@ -209,6 +216,9 @@ export default function LeavesScreen() {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary} />
+        }
       >
         {/* Transparent spacer to let top of boy show through before scrolling */}
         <View style={styles.heroSpacer} />
